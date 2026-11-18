@@ -29,23 +29,43 @@ class APITest(unittest.TestCase):
         conn.close()
         return result
 
-    def test_juego_completo(self):
+    def login(self, nombre):
+        return self.request("POST", "/login", {"usuario": nombre})[1]["token"]
+
+    def test_partida_uno_contra_uno(self):
         self.assertEqual(self.request("GET", "/juego")[0], 401)
-        _, login = self.request("POST", "/login", {"usuario": "Ana"})
-        token = login["token"]
-        status, juego = self.request("POST", "/juego", token=token)
-        self.assertEqual((status, juego["estado"]), (201, "sin completar"))
+        ana, beto, carla = self.login("Ana"), self.login("Beto"), self.login("Carla")
+
+        # Crear partida con número secreto
+        self.assertEqual(self.request("POST", "/juego", {"secreto": "1123"}, ana)[0], 400)
+        status, juego = self.request("POST", "/juego", {"secreto": "1234"}, ana)
+        self.assertEqual((status, juego["estado"], juego["jugadores"]), (201, "sin completar", ["Ana"]))
+        self.assertNotIn("secretos", juego)
         path = "/juego/" + juego["id"]
-        self.assertNotIn("secreto", juego)
-        self.assertEqual(self.request("PUT", path, token=token)[1]["estado"], "en juego")
-        self.assertEqual(self.request("PUT", path, token=token)[0], 409)
-        self.assertEqual(self.request("POST", path + "/jugar", {"numero": "1123"}, token)[0], 400)
-        secreto = app.juegos[juego["id"]]["secreto"]
-        status, resultado = self.request("POST", path + "/jugar", {"numero": secreto}, token)
-        self.assertEqual((status, resultado["resultado"]["fijas"]), (200, 4))
-        self.assertEqual(self.request("GET", path, token=token)[1]["estado"], "terminado")
-        self.assertEqual(self.request("POST", path + "/jugar", {"numero": secreto}, token)[0], 409)
-        self.assertEqual(self.request("GET", "/juego", token=token)[0], 200)
+
+        # No se puede jugar sin rival ni unirse a la propia partida
+        self.assertEqual(self.request("POST", path + "/jugar", {"numero": "5678"}, ana)[0], 409)
+        self.assertEqual(self.request("PUT", path, {"secreto": "5678"}, ana)[0], 409)
+
+        # Beto se une con su número secreto
+        status, juego = self.request("PUT", path, {"secreto": "5678"}, beto)
+        self.assertEqual((status, juego["estado"], juego["turno"]), (200, "en juego", "Ana"))
+        self.assertEqual(self.request("PUT", path, {"secreto": "9012"}, carla)[0], 409)
+
+        # Turnos: empieza quien creó la partida
+        self.assertEqual(self.request("POST", path + "/jugar", {"numero": "0123"}, beto)[0], 409)
+        self.assertEqual(self.request("POST", path + "/jugar", {"numero": "0123"}, carla)[0], 403)
+        status, r = self.request("POST", path + "/jugar", {"numero": "5687"}, ana)
+        self.assertEqual((status, r["resultado"]["picas"], r["resultado"]["fijas"], r["juego"]["turno"]), (200, 2, 2, "Beto"))
+
+        # Beto adivina el número de Ana y gana
+        status, r = self.request("POST", path + "/jugar", {"numero": "1234"}, beto)
+        self.assertEqual((status, r["resultado"]["fijas"]), (200, 4))
+        status, juego = self.request("GET", path, token=ana)
+        self.assertEqual((juego["estado"], juego["ganador"], juego["turno"]), ("terminado", "Beto", None))
+        self.assertEqual(juego["secretos"], {"Ana": "1234", "Beto": "5678"})
+        self.assertEqual(self.request("POST", path + "/jugar", {"numero": "5678"}, ana)[0], 409)
+        self.assertEqual(self.request("GET", "/juego", token=ana)[0], 200)
 
     def test_picas_y_fijas(self):
         self.assertEqual(app.evaluar("0123", "0324"), (1, 2))

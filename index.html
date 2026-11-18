@@ -20,55 +20,62 @@
     button { border: 0; border-radius: 8px; padding: 12px 18px; background: #75e4bd; color: #09251d; font: inherit; font-weight: 700; cursor: pointer; }
     button:disabled, input:disabled { opacity: .5; cursor: not-allowed; }
     .secondary { background: #34465e; color: #fff; }
+    .small { padding: 7px 12px; font-size: .9rem; }
     #mensaje { min-height: 24px; color: #f2c96d; }
     #mensaje.exito { color: #75e4bd; }
     table { border-collapse: collapse; width: 100%; text-align: left; }
     th, td { padding: 10px; border-bottom: 1px solid #344156; }
     th { color: #a7b7ce; font-size: .85rem; }
-    .numero { letter-spacing: .12em; font-weight: 700; font-variant-numeric: tabular-nums; }
     .info { display: flex; flex-wrap: wrap; gap: 10px 24px; color: #a7b7ce; font-size: .9rem; }
     strong { color: #f2f6fd; }
-    .id { overflow-wrap: anywhere; }
+    .turno { font-size: 1.1rem; font-weight: 700; color: #f2c96d; }
+    .turno.mio { color: #75e4bd; }
   </style>
 </head>
 <body>
 <main>
-  <div class="tag">Un jugador · contra la máquina</div>
+  <div class="tag">Multijugador · 1 contra 1</div>
   <h1>Picas y Fijas</h1>
-  <p>Descubre el número secreto de 4 cifras diferentes. Una <strong>fija</strong> está en la posición correcta; una <strong>pica</strong> es una cifra correcta en otra posición.</p>
+  <p>Cada jugador elige un número secreto de 4 cifras diferentes. Por turnos, intentan adivinar el número del rival. Una <strong>fija</strong> es una cifra en la posición correcta; una <strong>pica</strong> es una cifra correcta en otra posición. Gana quien consiga 4 fijas primero.</p>
 
-  <section class="card" aria-labelledby="inicio-titulo">
-    <h2 id="inicio-titulo">1. Inicia sesión</h2>
+  <section class="card">
+    <h2>1. Inicia sesión</h2>
     <form id="login-form" class="row">
-      <div class="field"><label for="usuario">Tu nombre</label><input id="usuario" maxlength="50" required autocomplete="nickname" placeholder="Ej. Ana"></div>
+      <div class="field"><label for="usuario">Tu nombre</label><input id="usuario" maxlength="50" required placeholder="Ej. Ana"></div>
       <button type="submit">Ingresar</button>
     </form>
     <p id="sesion">Todavía no has iniciado sesión.</p>
   </section>
 
-  <section class="card" aria-labelledby="partida-titulo">
-    <h2 id="partida-titulo">2. Comienza una partida</h2>
-    <p>Se creará una partida nueva y te unirás automáticamente. El número puede empezar por cero.</p>
-    <div class="row"><button id="crear" disabled>Nueva partida</button><button id="actualizar" class="secondary" disabled>Actualizar estado</button></div>
-    <p class="info"><span>Jugador: <strong id="jugador">—</strong></span><span>Estado: <strong id="estado">—</strong></span></p>
-    <div class="info id">ID: <span id="id">—</span></div>
+  <section class="card">
+    <h2>2. Crea una partida o únete a una</h2>
+    <div class="row">
+      <div class="field"><label for="secreto">Tu número secreto</label><input id="secreto" type="password" inputmode="numeric" maxlength="4" placeholder="4 cifras sin repetir" disabled></div>
+      <button id="crear" disabled>Crear partida</button>
+      <button id="refrescar" class="secondary" disabled>Actualizar lista</button>
+    </div>
+    <p>Partidas esperando rival:</p>
+    <table><thead><tr><th>Creada por</th><th>ID</th><th></th></tr></thead><tbody id="disponibles"><tr><td colspan="3">Inicia sesión para ver las partidas.</td></tr></tbody></table>
   </section>
 
-  <section class="card" aria-labelledby="jugar-titulo">
-    <h2 id="jugar-titulo">3. Adivina el número</h2>
+  <section class="card">
+    <h2>3. Juega</h2>
+    <p class="info"><span>Jugadores: <strong id="jugadores">—</strong></span><span>Estado: <strong id="estado">—</strong></span><span>Tu secreto: <strong id="mi-secreto">—</strong></span></p>
+    <p id="turno" class="turno"></p>
     <form id="jugar-form" class="row">
-      <div class="field"><label for="numero">Cuatro cifras sin repetir</label><input id="numero" inputmode="numeric" autocomplete="off" pattern="[0-9]{4}" maxlength="4" placeholder="Ej. 0123" required disabled></div>
+      <div class="field"><label for="numero">Adivina el número de tu rival</label><input id="numero" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="Ej. 0123" disabled></div>
       <button id="enviar" type="submit" disabled>Probar número</button>
     </form>
     <p id="mensaje" role="status" aria-live="polite"></p>
-    <table><thead><tr><th>Intento</th><th>Número</th><th>Picas</th><th>Fijas</th></tr></thead><tbody id="historial"><tr><td colspan="4">Aún no hay intentos.</td></tr></tbody></table>
+    <table><thead><tr><th>#</th><th>Jugador</th><th>Número</th><th>Picas</th><th>Fijas</th></tr></thead><tbody id="historial"><tr><td colspan="5">Aún no hay intentos.</td></tr></tbody></table>
   </section>
 </main>
 <script>
-  let token = null;
-  let partida = null;
+  let token = null, yo = null, partida = null, miSecreto = null;
   const $ = id => document.getElementById(id);
+  const valido = n => /^[0-9]{4}$/.test(n) && new Set(n).size === 4;
   function mensaje(texto, exito = false) { $('mensaje').textContent = texto; $('mensaje').className = exito ? 'exito' : ''; }
+
   async function api(ruta, metodo = 'GET', datos) {
     const cabeceras = { 'Content-Type': 'application/json' };
     if (token) cabeceras.Authorization = 'Bearer ' + token;
@@ -77,65 +84,115 @@
     if (!respuesta.ok) throw new Error(contenido.error || 'No se pudo completar la solicitud.');
     return contenido;
   }
-  function mostrar(juego) {
-    partida = juego.id;
-    $('jugador').textContent = juego.jugador || '—';
-    $('estado').textContent = juego.estado;
-    $('id').textContent = juego.id;
-    $('actualizar').disabled = false;
-    const habilitado = juego.estado === 'en juego';
-    $('numero').disabled = !habilitado;
-    $('enviar').disabled = !habilitado;
-    $('historial').replaceChildren();
-    if (!juego.intentos.length) {
-      const fila = $('historial').insertRow();
-      const celda = fila.insertCell(); celda.colSpan = 4; celda.textContent = 'Aún no hay intentos.';
-    } else juego.intentos.forEach((intento, i) => {
-      const fila = $('historial').insertRow();
-      [i + 1, intento.numero, intento.picas, intento.fijas].forEach(valor => { fila.insertCell().textContent = valor; });
+
+  function filaVacia(tabla, columnas, texto) {
+    const celda = $(tabla).insertRow().insertCell();
+    celda.colSpan = columnas; celda.textContent = texto;
+  }
+
+  async function cargarLista() {
+    if (!token) return;
+    const juegos = await api('/juego');
+    $('disponibles').replaceChildren();
+    const libres = juegos.filter(j => j.estado === 'sin completar' && !j.jugadores.includes(yo));
+    if (!libres.length) return filaVacia('disponibles', 3, 'No hay partidas esperando rival. ¡Crea una!');
+    libres.forEach(j => {
+      const fila = $('disponibles').insertRow();
+      fila.insertCell().textContent = j.jugadores[0];
+      fila.insertCell().textContent = j.id.slice(0, 8);
+      const boton = document.createElement('button');
+      boton.textContent = 'Unirse'; boton.className = 'small';
+      boton.disabled = partida !== null;
+      boton.addEventListener('click', () => unirse(j.id));
+      fila.insertCell().appendChild(boton);
     });
   }
+
+  function mostrar(juego) {
+    partida = juego.estado === 'terminado' ? null : juego.id;
+    $('jugadores').textContent = juego.jugadores.join(' vs ') + (juego.jugadores.length < 2 ? ' (esperando rival…)' : '');
+    $('estado').textContent = juego.estado;
+    const miTurno = juego.estado === 'en juego' && juego.turno === yo;
+    $('numero').disabled = !miTurno;
+    $('enviar').disabled = !miTurno;
+    $('crear').disabled = partida !== null;
+    $('turno').className = 'turno' + (miTurno ? ' mio' : '');
+    if (juego.estado === 'sin completar') $('turno').textContent = 'Esperando a que alguien se una…';
+    else if (juego.estado === 'en juego') $('turno').textContent = miTurno ? '¡Es tu turno!' : 'Turno de ' + juego.turno + '…';
+    else {
+      const secretos = Object.entries(juego.secretos).map(([nombre, s]) => nombre + ': ' + s).join(' · ');
+      $('turno').textContent = (juego.ganador === yo ? '🏆 ¡Ganaste!' : 'Ganó ' + juego.ganador + '.') + ' Números secretos → ' + secretos;
+    }
+    $('historial').replaceChildren();
+    if (!juego.intentos.length) filaVacia('historial', 5, 'Aún no hay intentos.');
+    juego.intentos.forEach((intento, i) => {
+      const fila = $('historial').insertRow();
+      [i + 1, intento.jugador, intento.numero, intento.picas, intento.fijas].forEach(v => { fila.insertCell().textContent = v; });
+    });
+  }
+
   $('login-form').addEventListener('submit', async e => {
     e.preventDefault();
     try {
       const datos = await api('/login', 'POST', { usuario: $('usuario').value.trim() });
-      token = datos.token; partida = null;
-      $('sesion').textContent = 'Sesión iniciada como ' + datos.usuario + '.';
-      $('crear').disabled = false; $('actualizar').disabled = true;
-      $('numero').disabled = true; $('enviar').disabled = true;
-      $('jugador').textContent = '—'; $('estado').textContent = '—'; $('id').textContent = '—';
-      $('historial').innerHTML = '<tr><td colspan="4">Aún no hay intentos.</td></tr>';
-      mensaje('Ya puedes crear una partida.', true);
+      token = datos.token; yo = datos.usuario; partida = null;
+      $('sesion').textContent = 'Sesión iniciada como ' + yo + '.';
+      $('secreto').disabled = false; $('crear').disabled = false; $('refrescar').disabled = false;
+      await cargarLista();
+      mensaje('Escribe tu número secreto y crea una partida, o únete a una de la lista.', true);
     } catch (error) { mensaje(error.message); }
   });
+
+  function leerSecreto() {
+    const s = $('secreto').value;
+    if (!valido(s)) { mensaje('Tu número secreto debe tener 4 cifras diferentes.'); return null; }
+    return s;
+  }
+
   $('crear').addEventListener('click', async () => {
-    $('crear').disabled = true;
+    const s = leerSecreto(); if (!s) return;
     try {
-      const juego = await api('/juego', 'POST');
-      mostrar(juego);
-      mostrar(await api('/juego/' + juego.id, 'PUT'));
-      mensaje('¡Partida lista! Escribe tu primer número.', true);
-      $('numero').focus();
+      miSecreto = s; $('mi-secreto').textContent = s;
+      mostrar(await api('/juego', 'POST', { secreto: s }));
+      await cargarLista();
+      mensaje('Partida creada. Comparte la página con tu rival para que se una.', true);
     } catch (error) { mensaje(error.message); }
-    finally { $('crear').disabled = false; }
   });
-  $('actualizar').addEventListener('click', async () => {
-    try { mostrar(await api('/juego/' + partida)); mensaje('Estado actualizado.', true); }
-    catch (error) { mensaje(error.message); }
-  });
+
+  async function unirse(id) {
+    const s = leerSecreto(); if (!s) return;
+    try {
+      miSecreto = s; $('mi-secreto').textContent = s;
+      mostrar(await api('/juego/' + id, 'PUT', { secreto: s }));
+      await cargarLista();
+      mensaje('Te uniste a la partida. Empieza quien la creó.', true);
+    } catch (error) { mensaje(error.message); }
+  }
+
+  $('refrescar').addEventListener('click', () => cargarLista().catch(e => mensaje(e.message)));
+
   $('jugar-form').addEventListener('submit', async e => {
     e.preventDefault();
     const numero = $('numero').value;
-    if (!/^[0-9]{4}$/.test(numero) || new Set(numero).size !== 4) return mensaje('Escribe 4 cifras diferentes.');
+    if (!valido(numero)) return mensaje('Escribe 4 cifras diferentes.');
     $('enviar').disabled = true;
     try {
       const respuesta = await api('/juego/' + partida + '/jugar', 'POST', { numero });
-      mostrar(respuesta.juego);
       $('numero').value = '';
-      if (respuesta.juego.estado === 'terminado') mensaje('¡Ganaste! Adivinaste el número. Puedes crear otra partida.', true);
-      else { mensaje(`${respuesta.resultado.picas} picas y ${respuesta.resultado.fijas} fijas. ¡Sigue intentando!`, true); $('numero').focus(); }
+      mostrar(respuesta.juego);
+      const r = respuesta.resultado;
+      mensaje(r.fijas === 4 ? '¡Adivinaste el número de tu rival!' : `${r.picas} picas y ${r.fijas} fijas.`, true);
     } catch (error) { mensaje(error.message); $('enviar').disabled = false; }
   });
+
+  // Cada 2 segundos revisa la partida para ver las jugadas del rival
+  setInterval(async () => {
+    if (!token) return;
+    try {
+      if (partida) mostrar(await api('/juego/' + partida));
+      else await cargarLista();
+    } catch (error) { /* se reintenta en el siguiente ciclo */ }
+  }, 2000);
 </script>
 </body>
 </html>

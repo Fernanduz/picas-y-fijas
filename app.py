@@ -1,4 +1,4 @@
-"""API REST de Picas y Fijas, usando únicamente la biblioteca estándar."""
+"""API REST de Picas y Fijas multijugador (1 contra 1), usando únicamente la biblioteca estándar."""
 
 import json
 import re
@@ -14,19 +14,28 @@ juegos = {}
 lock = threading.RLock()
 
 
+def numero_valido(numero):
+    return isinstance(numero, str) and re.fullmatch(r"[0-9]{4}", numero) is not None and len(set(numero)) == 4
+
+
 def estado(juego):
-    if not juego["jugador"]:
+    if len(juego["jugadores"]) < 2:
         return "sin completar"
-    return "terminado" if juego["terminado"] else "en juego"
+    return "terminado" if juego["ganador"] else "en juego"
 
 
 def publico(juego):
-    return {
+    datos = {
         "id": juego["id"],
-        "jugador": juego["jugador"],
+        "jugadores": juego["jugadores"],
         "estado": estado(juego),
+        "turno": juego["turno"],
+        "ganador": juego["ganador"],
         "intentos": juego["intentos"],
     }
+    if juego["ganador"]:
+        datos["secretos"] = juego["secretos"]
+    return datos
 
 
 def evaluar(secreto, intento):
@@ -53,7 +62,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
             return datos
         except (ValueError, UnicodeDecodeError):
-            return None
+            return {}
 
     def usuario(self):
         encabezado = self.headers.get("Authorization", "")
@@ -77,8 +86,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if metodo == "POST" and ruta == "/login":
-                datos = self.cuerpo()
-                nombre = datos.get("usuario") if datos is not None else None
+                nombre = self.cuerpo().get("usuario")
                 if not isinstance(nombre, str) or not nombre.strip() or len(nombre.strip()) > 50:
                     return self.responder(400, {"error": "Indica un usuario de 1 a 50 caracteres."})
                 token = secrets.token_urlsafe(32)
@@ -92,13 +100,16 @@ class Handler(BaseHTTPRequestHandler):
             if not usuario:
                 return self.responder(401, {"error": "Envía un token válido en Authorization: Bearer <token>."})
 
+            # /juego
             if len(partes) == 1:
                 if metodo == "POST":
+                    secreto = self.cuerpo().get("secreto")
+                    if not numero_valido(secreto):
+                        return self.responder(400, {"error": "Tu número secreto debe tener 4 cifras diferentes."})
                     identificador = str(uuid.uuid4())
                     juegos[identificador] = {
-                        "id": identificador, "creador": usuario, "jugador": None,
-                        "secreto": "".join(secrets.SystemRandom().sample("0123456789", 4)),
-                        "intentos": [], "terminado": False,
+                        "id": identificador, "jugadores": [usuario], "secretos": {usuario: secreto},
+                        "turno": None, "ganador": None, "intentos": [],
                     }
                     return self.responder(201, publico(juegos[identificador]))
                 if metodo == "GET":
@@ -108,37 +119,57 @@ class Handler(BaseHTTPRequestHandler):
             juego = juegos.get(partes[1])
             if not juego:
                 return self.responder(404, {"error": "Partida no encontrada."})
+
+            # /juego/{ID}
             if len(partes) == 2:
                 if metodo == "GET":
                     return self.responder(200, publico(juego))
                 if metodo == "PUT":
-                    if juego["jugador"]:
-                        return self.responder(409, {"error": "La partida ya tiene jugador."})
-                    juego["jugador"] = usuario
+                    if usuario in juego["jugadores"]:
+                        return self.responder(409, {"error": "Ya estás en esta partida."})
+                    if len(juego["jugadores"]) == 2:
+                        return self.responder(409, {"error": "La partida ya tiene dos jugadores."})
+                    secreto = self.cuerpo().get("secreto")
+                    if not numero_valido(secreto):
+                        return self.responder(400, {"error": "Tu número secreto debe tener 4 cifras diferentes."})
+                    juego["jugadores"].append(usuario)
+                    juego["secretos"][usuario] = secreto
+                    juego["turno"] = juego["jugadores"][0]
                     return self.responder(200, publico(juego))
                 return self.responder(405, {"error": "Método no permitido."})
 
+            # /juego/{ID}/jugar
             if partes[2] != "jugar":
                 return self.responder(404, {"error": "Ruta no encontrada."})
             if metodo != "POST":
                 return self.responder(405, {"error": "Método no permitido."})
-            if juego["jugador"] != usuario:
-                return self.responder(403, {"error": "Debes unirte a esta partida para jugar."})
-            if juego["terminado"]:
+            if usuario not in juego["jugadores"]:
+                return self.responder(403, {"error": "No eres jugador de esta partida."})
+            if estado(juego) == "sin completar":
+                return self.responder(409, {"error": "Falta que un rival se una a la partida."})
+            if estado(juego) == "terminado":
                 return self.responder(409, {"error": "La partida ya terminó."})
-            datos = self.cuerpo()
-            intento = datos.get("numero") if datos is not None else None
-            if not isinstance(intento, str) or not re.fullmatch(r"[0-9]{4}", intento) or len(set(intento)) != 4:
+            if juego["turno"] != usuario:
+                return self.responder(409, {"error": f"No es tu turno; le toca a {juego['turno']}."})
+            intento = self.cuerpo().get("numero")
+            if not numero_valido(intento):
                 return self.responder(400, {"error": "El número debe ser una cadena de 4 cifras diferentes."})
-            picas, fijas = evaluar(juego["secreto"], intento)
-            resultado = {"numero": intento, "picas": picas, "fijas": fijas}
+            rival = juego["jugadores"][1] if juego["jugadores"][0] == usuario else juego["jugadores"][0]
+            picas, fijas = evaluar(juego["secretos"][rival], intento)
+            resultado = {"jugador": usuario, "numero": intento, "picas": picas, "fijas": fijas}
             juego["intentos"].append(resultado)
-            juego["terminado"] = fijas == 4
+            if fijas == 4:
+                juego["ganador"] = usuario
+                juego["turno"] = None
+            else:
+                juego["turno"] = rival
             return self.responder(200, {"resultado": resultado, "juego": publico(juego)})
 
     do_GET = procesar
     do_POST = procesar
     do_PUT = procesar
+    do_DELETE = procesar
+    do_PATCH = procesar
 
 
 if __name__ == "__main__":
