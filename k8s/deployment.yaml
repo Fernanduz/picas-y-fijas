@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: picas-y-fijas
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: picas-y-fijas
+  template:
+    metadata:
+      labels:
+        app: picas-y-fijas
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/fernanduz/picas-y-fijas:1.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: picas-y-fijas
+spec:
+  selector:
+    app: picas-y-fijas
+  ports:
+    - port: 80
+      targetPort: 8000
+  type: ClusterIP
