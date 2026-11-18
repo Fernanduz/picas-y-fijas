@@ -67,6 +67,19 @@ class APITest(unittest.TestCase):
         self.assertEqual(self.request("POST", path + "/jugar", {"numero": "5678"}, ana)[0], 409)
         self.assertEqual(self.request("GET", "/juego", token=ana)[0], 200)
 
+    def test_cancelar_y_limpiar(self):
+        ana, beto = self.login("Ana2"), self.login("Beto2")
+        _, juego = self.request("POST", "/juego", {"secreto": "1234"}, ana)
+        path = "/juego/" + juego["id"]
+        self.assertEqual(self.request("DELETE", path, token=beto)[0], 403)
+        self.assertEqual(self.request("DELETE", path, token=ana)[0], 200)
+        self.assertEqual(self.request("GET", path, token=ana)[0], 404)
+
+        # Una partida sin actividad se borra sola
+        _, juego = self.request("POST", "/juego", {"secreto": "1234"}, ana)
+        app.juegos[juego["id"]]["actualizada"] -= app.INACTIVIDAD + 1
+        self.assertEqual(self.request("GET", "/juego/" + juego["id"], token=ana)[0], 404)
+
     def test_picas_y_fijas(self):
         self.assertEqual(app.evaluar("0123", "0324"), (1, 2))
         self.assertEqual(app.evaluar("0123", "0123"), (0, 4))

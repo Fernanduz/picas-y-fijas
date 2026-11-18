@@ -4,6 +4,7 @@ import json
 import re
 import secrets
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -12,6 +13,14 @@ from urllib.parse import urlsplit
 usuarios = {}
 juegos = {}
 lock = threading.RLock()
+INACTIVIDAD = 5 * 60  # segundos sin actividad antes de borrar una partida
+
+
+def limpiar_inactivas():
+    ahora = time.time()
+    for identificador, juego in list(juegos.items()):
+        if ahora - juego["actualizada"] > INACTIVIDAD:
+            del juegos[identificador]
 
 
 def numero_valido(numero):
@@ -76,6 +85,7 @@ class Handler(BaseHTTPRequestHandler):
         metodo = self.command
 
         with lock:
+            limpiar_inactivas()
             if metodo == "GET" and ruta == "/":
                 contenido = Path(__file__).with_name("index.html").read_bytes()
                 self.send_response(200)
@@ -110,6 +120,7 @@ class Handler(BaseHTTPRequestHandler):
                     juegos[identificador] = {
                         "id": identificador, "jugadores": [usuario], "secretos": {usuario: secreto},
                         "turno": None, "ganador": None, "intentos": [],
+                        "actualizada": time.time(),
                     }
                     return self.responder(201, publico(juegos[identificador]))
                 if metodo == "GET":
@@ -119,6 +130,10 @@ class Handler(BaseHTTPRequestHandler):
             juego = juegos.get(partes[1])
             if not juego:
                 return self.responder(404, {"error": "Partida no encontrada."})
+
+            # Cualquier petición de un jugador mantiene viva la partida
+            if usuario in juego["jugadores"]:
+                juego["actualizada"] = time.time()
 
             # /juego/{ID}
             if len(partes) == 2:
@@ -135,7 +150,15 @@ class Handler(BaseHTTPRequestHandler):
                     juego["jugadores"].append(usuario)
                     juego["secretos"][usuario] = secreto
                     juego["turno"] = juego["jugadores"][0]
+                    juego["actualizada"] = time.time()
                     return self.responder(200, publico(juego))
+                if metodo == "DELETE":
+                    if usuario != juego["jugadores"][0]:
+                        return self.responder(403, {"error": "Solo quien creó la partida puede cancelarla."})
+                    if estado(juego) != "sin completar":
+                        return self.responder(409, {"error": "Solo se puede cancelar una partida que espera rival."})
+                    del juegos[partes[1]]
+                    return self.responder(200, {"mensaje": "Partida cancelada."})
                 return self.responder(405, {"error": "Método no permitido."})
 
             # /juego/{ID}/jugar

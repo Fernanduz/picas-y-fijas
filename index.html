@@ -52,9 +52,10 @@
     <div class="row">
       <div class="field"><label for="secreto">Tu número secreto</label><input id="secreto" type="password" inputmode="numeric" maxlength="4" placeholder="4 cifras sin repetir" disabled></div>
       <button id="crear" disabled>Crear partida</button>
+      <button id="cancelar" class="secondary" hidden>Cancelar partida</button>
       <button id="refrescar" class="secondary" disabled>Actualizar lista</button>
     </div>
-    <p>Partidas esperando rival:</p>
+    <p id="ayuda-lista">Partidas esperando rival:</p>
     <table><thead><tr><th>Creada por</th><th>ID</th><th></th></tr></thead><tbody id="disponibles"><tr><td colspan="3">Inicia sesión para ver las partidas.</td></tr></tbody></table>
   </section>
 
@@ -71,7 +72,7 @@
   </section>
 </main>
 <script>
-  let token = null, yo = null, partida = null, miSecreto = null;
+  let token = null, yo = null, partida = null, miSecreto = null, estadoActual = null, ultimaLista = '';
   const $ = id => document.getElementById(id);
   const valido = n => /^[0-9]{4}$/.test(n) && new Set(n).size === 4;
   function mensaje(texto, exito = false) { $('mensaje').textContent = texto; $('mensaje').className = exito ? 'exito' : ''; }
@@ -93,8 +94,12 @@
   async function cargarLista() {
     if (!token) return;
     const juegos = await api('/juego');
-    $('disponibles').replaceChildren();
     const libres = juegos.filter(j => j.estado === 'sin completar' && !j.jugadores.includes(yo));
+    const clave = JSON.stringify([partida, libres.map(j => j.id)]);
+    if (clave === ultimaLista) return;
+    ultimaLista = clave;
+    $('ayuda-lista').textContent = partida ? 'Partidas esperando rival (termina o cancela tu partida actual para unirte a otra):' : 'Partidas esperando rival:';
+    $('disponibles').replaceChildren();
     if (!libres.length) return filaVacia('disponibles', 3, 'No hay partidas esperando rival. ¡Crea una!');
     libres.forEach(j => {
       const fila = $('disponibles').insertRow();
@@ -110,6 +115,8 @@
 
   function mostrar(juego) {
     partida = juego.estado === 'terminado' ? null : juego.id;
+    estadoActual = juego.estado;
+    $('cancelar').hidden = !(juego.estado === 'sin completar' && juego.jugadores[0] === yo);
     $('jugadores').textContent = juego.jugadores.join(' vs ') + (juego.jugadores.length < 2 ? ' (esperando rival…)' : '');
     $('estado').textContent = juego.estado;
     const miTurno = juego.estado === 'en juego' && juego.turno === yo;
@@ -143,6 +150,15 @@
     } catch (error) { mensaje(error.message); }
   });
 
+  function limpiarPartida(texto) {
+    partida = null; estadoActual = null; ultimaLista = '';
+    $('cancelar').hidden = true; $('crear').disabled = false;
+    $('numero').disabled = true; $('enviar').disabled = true;
+    $('jugadores').textContent = '—'; $('estado').textContent = '—'; $('mi-secreto').textContent = '—';
+    $('turno').textContent = ''; $('historial').replaceChildren(); filaVacia('historial', 5, 'Aún no hay intentos.');
+    mensaje(texto);
+  }
+
   function leerSecreto() {
     const s = $('secreto').value;
     if (!valido(s)) { mensaje('Tu número secreto debe tener 4 cifras diferentes.'); return null; }
@@ -169,7 +185,18 @@
     } catch (error) { mensaje(error.message); }
   }
 
-  $('refrescar').addEventListener('click', () => cargarLista().catch(e => mensaje(e.message)));
+  $('refrescar').addEventListener('click', () => { ultimaLista = ''; cargarLista().catch(e => mensaje(e.message)); });
+
+  $('cancelar').addEventListener('click', async () => {
+    try { await api('/juego/' + partida, 'DELETE'); limpiarPartida('Partida cancelada.'); await cargarLista(); }
+    catch (error) { mensaje(error.message); }
+  });
+
+  // Al cerrar la pestaña, se cancela la partida que todavía espera rival
+  window.addEventListener('pagehide', () => {
+    if (token && partida && estadoActual === 'sin completar')
+      fetch('/juego/' + partida, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token }, keepalive: true });
+  });
 
   $('jugar-form').addEventListener('submit', async e => {
     e.preventDefault();
@@ -190,8 +217,10 @@
     if (!token) return;
     try {
       if (partida) mostrar(await api('/juego/' + partida));
-      else await cargarLista();
-    } catch (error) { /* se reintenta en el siguiente ciclo */ }
+      await cargarLista();
+    } catch (error) {
+      if (partida && error.message === 'Partida no encontrada.') limpiarPartida('La partida ya no existe (fue cancelada o estuvo inactiva). Crea o únete a otra.');
+    }
   }, 2000);
 </script>
 </body>
