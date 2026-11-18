@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Picas y Fijas</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #e7edf9; background: #0b1220; font: 16px/1.5 system-ui, sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 48px 20px; }
+    .tag { color: #71e2c0; text-transform: uppercase; font-size: .75rem; font-weight: 700; letter-spacing: .12em; }
+    h1 { margin: 4px 0; font-size: clamp(2.3rem, 7vw, 3.7rem); letter-spacing: -.04em; }
+    h2 { margin: 0 0 12px; font-size: 1.2rem; }
+    p { color: #a7b7ce; }
+    .card { background: #151f30; border: 1px solid #2c3a50; border-radius: 16px; padding: 22px; margin-top: 18px; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+    label { display: block; font-size: .9rem; font-weight: 600; margin-bottom: 6px; }
+    input { background: #0b1220; border: 1px solid #51627c; color: white; border-radius: 8px; padding: 11px 12px; font: inherit; width: 100%; }
+    .field { flex: 1; min-width: 170px; }
+    button { border: 0; border-radius: 8px; padding: 12px 18px; background: #75e4bd; color: #09251d; font: inherit; font-weight: 700; cursor: pointer; }
+    button:disabled, input:disabled { opacity: .5; cursor: not-allowed; }
+    .secondary { background: #34465e; color: #fff; }
+    #mensaje { min-height: 24px; color: #f2c96d; }
+    #mensaje.exito { color: #75e4bd; }
+    table { border-collapse: collapse; width: 100%; text-align: left; }
+    th, td { padding: 10px; border-bottom: 1px solid #344156; }
+    th { color: #a7b7ce; font-size: .85rem; }
+    .numero { letter-spacing: .12em; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .info { display: flex; flex-wrap: wrap; gap: 10px 24px; color: #a7b7ce; font-size: .9rem; }
+    strong { color: #f2f6fd; }
+    .id { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="tag">Un jugador · contra la máquina</div>
+  <h1>Picas y Fijas</h1>
+  <p>Descubre el número secreto de 4 cifras diferentes. Una <strong>fija</strong> está en la posición correcta; una <strong>pica</strong> es una cifra correcta en otra posición.</p>
+
+  <section class="card" aria-labelledby="inicio-titulo">
+    <h2 id="inicio-titulo">1. Inicia sesión</h2>
+    <form id="login-form" class="row">
+      <div class="field"><label for="usuario">Tu nombre</label><input id="usuario" maxlength="50" required autocomplete="nickname" placeholder="Ej. Ana"></div>
+      <button type="submit">Ingresar</button>
+    </form>
+    <p id="sesion">Todavía no has iniciado sesión.</p>
+  </section>
+
+  <section class="card" aria-labelledby="partida-titulo">
+    <h2 id="partida-titulo">2. Comienza una partida</h2>
+    <p>Se creará una partida nueva y te unirás automáticamente. El número puede empezar por cero.</p>
+    <div class="row"><button id="crear" disabled>Nueva partida</button><button id="actualizar" class="secondary" disabled>Actualizar estado</button></div>
+    <p class="info"><span>Jugador: <strong id="jugador">—</strong></span><span>Estado: <strong id="estado">—</strong></span></p>
+    <div class="info id">ID: <span id="id">—</span></div>
+  </section>
+
+  <section class="card" aria-labelledby="jugar-titulo">
+    <h2 id="jugar-titulo">3. Adivina el número</h2>
+    <form id="jugar-form" class="row">
+      <div class="field"><label for="numero">Cuatro cifras sin repetir</label><input id="numero" inputmode="numeric" autocomplete="off" pattern="[0-9]{4}" maxlength="4" placeholder="Ej. 0123" required disabled></div>
+      <button id="enviar" type="submit" disabled>Probar número</button>
+    </form>
+    <p id="mensaje" role="status" aria-live="polite"></p>
+    <table><thead><tr><th>Intento</th><th>Número</th><th>Picas</th><th>Fijas</th></tr></thead><tbody id="historial"><tr><td colspan="4">Aún no hay intentos.</td></tr></tbody></table>
+  </section>
+</main>
+<script>
+  let token = null;
+  let partida = null;
+  const $ = id => document.getElementById(id);
+  function mensaje(texto, exito = false) { $('mensaje').textContent = texto; $('mensaje').className = exito ? 'exito' : ''; }
+  async function api(ruta, metodo = 'GET', datos) {
+    const cabeceras = { 'Content-Type': 'application/json' };
+    if (token) cabeceras.Authorization = 'Bearer ' + token;
+    const respuesta = await fetch(ruta, { method: metodo, headers: cabeceras, body: datos ? JSON.stringify(datos) : undefined });
+    const contenido = await respuesta.json();
+    if (!respuesta.ok) throw new Error(contenido.error || 'No se pudo completar la solicitud.');
+    return contenido;
+  }
+  function mostrar(juego) {
+    partida = juego.id;
+    $('jugador').textContent = juego.jugador || '—';
+    $('estado').textContent = juego.estado;
+    $('id').textContent = juego.id;
+    $('actualizar').disabled = false;
+    const habilitado = juego.estado === 'en juego';
+    $('numero').disabled = !habilitado;
+    $('enviar').disabled = !habilitado;
+    $('historial').replaceChildren();
+    if (!juego.intentos.length) {
+      const fila = $('historial').insertRow();
+      const celda = fila.insertCell(); celda.colSpan = 4; celda.textContent = 'Aún no hay intentos.';
+    } else juego.intentos.forEach((intento, i) => {
+      const fila = $('historial').insertRow();
+      [i + 1, intento.numero, intento.picas, intento.fijas].forEach(valor => { fila.insertCell().textContent = valor; });
+    });
+  }
+  $('login-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+      const datos = await api('/login', 'POST', { usuario: $('usuario').value.trim() });
+      token = datos.token; partida = null;
+      $('sesion').textContent = 'Sesión iniciada como ' + datos.usuario + '.';
+      $('crear').disabled = false; $('actualizar').disabled = true;
+      $('numero').disabled = true; $('enviar').disabled = true;
+      $('jugador').textContent = '—'; $('estado').textContent = '—'; $('id').textContent = '—';
+      $('historial').innerHTML = '<tr><td colspan="4">Aún no hay intentos.</td></tr>';
+      mensaje('Ya puedes crear una partida.', true);
+    } catch (error) { mensaje(error.message); }
+  });
+  $('crear').addEventListener('click', async () => {
+    $('crear').disabled = true;
+    try {
+      const juego = await api('/juego', 'POST');
+      mostrar(juego);
+      mostrar(await api('/juego/' + juego.id, 'PUT'));
+      mensaje('¡Partida lista! Escribe tu primer número.', true);
+      $('numero').focus();
+    } catch (error) { mensaje(error.message); }
+    finally { $('crear').disabled = false; }
+  });
+  $('actualizar').addEventListener('click', async () => {
+    try { mostrar(await api('/juego/' + partida)); mensaje('Estado actualizado.', true); }
+    catch (error) { mensaje(error.message); }
+  });
+  $('jugar-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const numero = $('numero').value;
+    if (!/^[0-9]{4}$/.test(numero) || new Set(numero).size !== 4) return mensaje('Escribe 4 cifras diferentes.');
+    $('enviar').disabled = true;
+    try {
+      const respuesta = await api('/juego/' + partida + '/jugar', 'POST', { numero });
+      mostrar(respuesta.juego);
+      $('numero').value = '';
+      if (respuesta.juego.estado === 'terminado') mensaje('¡Ganaste! Adivinaste el número. Puedes crear otra partida.', true);
+      else { mensaje(`${respuesta.resultado.picas} picas y ${respuesta.resultado.fijas} fijas. ¡Sigue intentando!`, true); $('numero').focus(); }
+    } catch (error) { mensaje(error.message); $('enviar').disabled = false; }
+  });
+</script>
+</body>
+</html>

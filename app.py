@@ -6,6 +6,7 @@ import secrets
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import urlsplit
 
 usuarios = {}
@@ -66,6 +67,15 @@ class Handler(BaseHTTPRequestHandler):
         metodo = self.command
 
         with lock:
+            if metodo == "GET" and ruta == "/":
+                contenido = Path(__file__).with_name("index.html").read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(contenido)))
+                self.end_headers()
+                self.wfile.write(contenido)
+                return
+
             if metodo == "POST" and ruta == "/login":
                 datos = self.cuerpo()
                 nombre = datos.get("usuario") if datos is not None else None

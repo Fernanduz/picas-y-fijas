@@ -51,6 +51,15 @@ class APITest(unittest.TestCase):
         self.assertEqual(app.evaluar("0123", "0324"), (1, 2))
         self.assertEqual(app.evaluar("0123", "0123"), (0, 4))
 
+    def test_pagina_web(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port)
+        conn.request("GET", "/")
+        response = conn.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertIn("text/html", response.getheader("Content-Type"))
+        self.assertIn("Picas y Fijas", response.read().decode("utf-8"))
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

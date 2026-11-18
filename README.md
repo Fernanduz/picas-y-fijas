@@ -20,6 +20,8 @@ La API escucha en `http://localhost:8000`. Para ejecutar las pruebas:
 python -m unittest -v
 ```
 
+Para jugar con botones, abre **http://localhost:8000/** en el navegador. Inicia sesión, pulsa **Nueva partida** y escribe tus intentos. La página usa los mismos endpoints REST descritos abajo; la API también se puede usar sin la página.
+
 ## Endpoints
 
 Todas las respuestas son JSON. Salvo `/login`, las solicitudes requieren el encabezado `Authorization: Bearer TOKEN`.
@@ -67,6 +69,8 @@ kubectl port-forward service/picas-y-fijas 8000:80
 ```
 
 Deja el `port-forward` ejecutándose y, en otra terminal del mismo entorno, ejecuta los ejemplos de `curl`. Si el entorno no dispone de Docker, construye y publica la imagen desde otro equipo o sistema de construcción de imágenes; el clúster solamente necesita descargarla.
+
+Para abrir la página en Killercoda, mantén activo el `port-forward` y usa la opción **Traffic / Ports** del entorno para abrir el puerto `8000`. La ubicación o el nombre exacto de esa opción puede variar según el escenario.
 
 ## Limitaciones
 
